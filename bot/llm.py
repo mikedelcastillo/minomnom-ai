@@ -80,6 +80,8 @@ CLASSIFY_SYSTEM_PROMPT = (
     "You are an intent classifier for a calorie tracking Telegram bot. "
     "Classify the user's message intent.\n"
     "- User is logging or describing a meal, drink, snack, or supplement they had → type 'tracking'\n"
+    "- User is asking a question about their logged nutrition data, calories, macros, "
+    "meal history, daily totals, weekly averages, or any stats from their food diary → type 'analytics'\n"
     "- Anything else (greetings, questions, random chat, non-food, too vague) → type 'general'\n"
     "Return only a JSON object, no markdown, no extra text."
 )
@@ -88,7 +90,29 @@ CLASSIFY_PROMPT = """Message: "{text}"
 
 Return exactly one of:
 {{"type": "tracking"}}
+{{"type": "analytics"}}
 {{"type": "general"}}"""
+
+TIME_WINDOW_SYSTEM_PROMPT = (
+    "You are a time-range parser for a nutrition tracking app. "
+    "Given a user's question, extract the time window they are asking about.\n"
+    "Return only one of these JSON formats, no markdown, no extra text:\n"
+    '{"window": "today"}\n'
+    '{"window": "yesterday"}\n'
+    '{"window": "last_N_hours", "n": <integer>}\n'
+    '{"window": "last_N_days",  "n": <integer>}\n'
+    '{"window": "last_N_weeks", "n": <integer>}\n'
+    '{"window": "last_N_months","n": <integer>}\n'
+    '{"window": "all_time"}\n'
+    "Rules: 'this week' or 'last week' → last_N_days with n=7. "
+    "'this month' or 'last month' → last_N_months with n=1. "
+    "No time reference at all → today. "
+    "n must always be a positive integer."
+)
+
+TIME_WINDOW_PROMPT = """Question: "{text}"
+
+What time window is the user asking about? Return the matching JSON."""
 
 GENERAL_SYSTEM_PROMPT = (
     "You are a nutritionist at a clinic front desk. Casual and a little witty, not clinical or formal. "
@@ -224,7 +248,7 @@ async def classify(text: str) -> dict:
                 raw = resp.json()["response"]
                 data = json.loads(raw)
                 t = data.get("type")
-                if t in ("tracking", "general"):
+                if t in ("tracking", "analytics", "general"):
                     return {"type": t}
                 logger.warning("classify() invalid response (attempt %d): %s", attempt + 1, raw)
             except (json.JSONDecodeError, KeyError) as e:
@@ -263,6 +287,85 @@ async def general_reply(text: str, history: "list[dict]") -> str:
         except (KeyError, Exception) as e:
             logger.warning("general_reply() error: %s", e)
     raise ValueError("Could not get a general reply from the model.")
+
+
+_VALID_WINDOWS = {"today", "yesterday", "last_N_hours", "last_N_days", "last_N_weeks", "last_N_months", "all_time"}
+
+
+def _validate_time_window(data: dict) -> "dict | None":
+    w = data.get("window")
+    if w not in _VALID_WINDOWS:
+        return None
+    if w in ("last_N_hours", "last_N_days", "last_N_weeks", "last_N_months"):
+        n = data.get("n")
+        if not isinstance(n, int) or n <= 0:
+            return None
+    return data
+
+
+async def extract_time_window(text: str) -> dict:
+    prompt = TIME_WINDOW_PROMPT.format(text=text)
+    payload = {
+        "model": OLLAMA_MODEL,
+        "system": TIME_WINDOW_SYSTEM_PROMPT,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for attempt in range(2):
+            try:
+                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
+                resp.raise_for_status()
+                raw = resp.json()["response"]
+                data = json.loads(raw)
+                result = _validate_time_window(data)
+                if result is not None:
+                    return result
+                logger.warning("extract_time_window() invalid response (attempt %d): %s", attempt + 1, raw)
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("extract_time_window() parse error (attempt %d): %s", attempt + 1, e)
+    # Safe fallback: today
+    return {"window": "today"}
+
+
+async def analytics_summary(question: str, totals: dict, meal_count: int, today_str: str) -> str:
+    cal_mid = (totals["calories"][0] + totals["calories"][1]) // 2
+    prot_mid = (totals["protein_g"][0] + totals["protein_g"][1]) // 2
+    carbs_mid = (totals["carbs_g"][0] + totals["carbs_g"][1]) // 2
+    fat_mid = (totals["fat_g"][0] + totals["fat_g"][1]) // 2
+    system = (
+        "You are a nutritionist assistant. Answer the user's question in exactly one short sentence. "
+        "Use the provided totals. Be specific with numbers. No intro, no lists, no em dashes."
+    )
+    user_msg = (
+        f"Today is {today_str}. {meal_count} meal(s) logged. "
+        f"Totals: {cal_mid} kcal, {prot_mid}g protein, {carbs_mid}g carbs, {fat_mid}g fat.\n"
+        f"Question: {question}"
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_msg},
+    ]
+    payload = {
+        "model": OLLAMA_CHAT_MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "stop": ["\n", "\n\nUser:", "\n\nAssistant:"],
+            "num_predict": 60,
+        },
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+            resp.raise_for_status()
+            content = resp.json()["message"]["content"]
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+        except (KeyError, Exception) as e:
+            logger.warning("analytics_summary() error: %s", e)
+    raise ValueError("Could not get an analytics summary from the model.")
 
 
 async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> dict:

@@ -152,6 +152,23 @@ async def get_meal_by_id(meal_id: int, user_id: int) -> "dict | None":
             return dict(row) if row else None
 
 
+async def get_meals_in_window(user_id: int, since_dt: str, until_dt: str) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT description, calories_min, calories_max,
+                      protein_min, protein_max, carbs_min, carbs_max,
+                      fat_min, fat_max, logged_at
+               FROM meals
+               WHERE user_id = ?
+                 AND logged_at >= ?
+                 AND logged_at <  ?
+               ORDER BY logged_at ASC""",
+            (user_id, since_dt, until_dt),
+        ) as cur:
+            return [dict(row) async for row in cur]
+
+
 async def delete_meal(meal_id: int, user_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(

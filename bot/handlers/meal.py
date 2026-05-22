@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import ConversationHandler, ContextTypes
@@ -12,6 +13,65 @@ from config import ALLOWED_USER_IDS
 logger = logging.getLogger(__name__)
 
 CLARIFYING = 1
+
+
+def _window_to_datetimes(window: dict) -> tuple[str, str]:
+    """Convert an extract_time_window result to (since_iso, until_iso) UTC strings."""
+    now = datetime.now(timezone.utc)
+    # until is always just past now so current meals are included
+    until = now + timedelta(minutes=1)
+    w = window.get("window", "today")
+    n = window.get("n", 1)
+
+    if w == "today":
+        since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif w == "yesterday":
+        yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        since = yesterday
+        until = yesterday + timedelta(days=1)
+    elif w == "last_N_hours":
+        since = now - timedelta(hours=n)
+    elif w == "last_N_days":
+        since = (now - timedelta(days=n)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif w == "last_N_weeks":
+        since = (now - timedelta(weeks=n)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif w == "last_N_months":
+        since = (now - timedelta(days=30 * n)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:  # all_time — hard cap at 365 days
+        since = (now - timedelta(days=365)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    fmt = "%Y-%m-%d %H:%M:%S"
+    return since.strftime(fmt), until.strftime(fmt)
+
+
+def _sum_meals_macros(meals: list[dict]) -> dict:
+    return {
+        "calories":  [sum(m["calories_min"] for m in meals), sum(m["calories_max"] for m in meals)],
+        "protein_g": [sum(m["protein_min"]  for m in meals), sum(m["protein_max"]  for m in meals)],
+        "carbs_g":   [sum(m["carbs_min"]    for m in meals), sum(m["carbs_max"]    for m in meals)],
+        "fat_g":     [sum(m["fat_min"]      for m in meals), sum(m["fat_max"]      for m in meals)],
+    }
+
+
+def _window_label(window: dict) -> str:
+    w = window.get("window", "today")
+    n = window.get("n", 1)
+    now = datetime.now(timezone.utc)
+    if w == "today":
+        return "Today, " + now.strftime("%b %-d")
+    if w == "yesterday":
+        return "Yesterday, " + (now - timedelta(days=1)).strftime("%b %-d")
+    if w == "last_N_hours":
+        return f"Last {n} hour{'s' if n != 1 else ''}"
+    if w == "last_N_days":
+        return f"Last {n} days"
+    if w == "last_N_weeks":
+        return f"Last {n} week{'s' if n != 1 else ''}"
+    if w == "last_N_months":
+        return f"Last {n} month{'s' if n != 1 else ''}"
+    return "All time"
+
+
 _DELETE_PREFIX = "del:"
 CLARIFY_PREFIX = "clarify:"
 
@@ -105,6 +165,36 @@ async def meal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         classification = await llm.classify(text)
     except ValueError:
         await update.message.reply_text("Sorry, I couldn't process that. Try again.")
+        return ConversationHandler.END
+
+    if classification["type"] == "analytics":
+        user_id = await db.upsert_user(user.id, user.full_name)
+        try:
+            window = await llm.extract_time_window(text)
+        except Exception:
+            window = {"window": "today"}
+        since_dt, until_dt = _window_to_datetimes(window)
+        meals = await db.get_meals_in_window(user_id, since_dt, until_dt)
+        label = _window_label(window)
+        if not meals:
+            await update.message.reply_text(f"No meals logged for {label.lower()}.")
+            return ConversationHandler.END
+        totals = _sum_meals_macros(meals)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            summary = await llm.analytics_summary(text, totals, len(meals), today_str)
+        except ValueError:
+            summary = f"{len(meals)} meal(s) logged."
+        reply = "\n".join([
+            label,
+            f"Calories:  {_format_range(*totals['calories'], ' kcal')}",
+            f"Protein:   {_format_range(*totals['protein_g'], ' g')}",
+            f"Carbs:     {_format_range(*totals['carbs_g'], ' g')}",
+            f"Fat:       {_format_range(*totals['fat_g'], ' g')}",
+            "",
+            summary,
+        ])
+        await update.message.reply_text(reply)
         return ConversationHandler.END
 
     if classification["type"] == "general":
