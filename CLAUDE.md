@@ -5,18 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the bot
 
 ```bash
-# Start all services (Ollama + bot)
+# Local development (single command — starts Ollama, pulls model, runs bot)
+./run.sh
+
+# Or manually (requires Ollama already running on localhost:11434)
+cd bot && python main.py
+
+# Docker Compose (production-style)
 docker compose up -d
-
-# Pull the LLM model on first run
-docker compose exec ollama ollama pull phi3.5
-
-# View bot logs
+docker compose exec ollama ollama pull phi3.5   # first run only
 docker compose logs -f bot
-
-# Run the bot locally (outside Docker) — requires Ollama running separately
-cd bot
-python main.py
 ```
 
 ## Local development setup

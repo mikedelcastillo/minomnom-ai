@@ -35,6 +35,20 @@ docker compose up -d
 docker compose exec ollama ollama pull phi3.5
 ```
 
+## Local development (no Docker)
+
+Requires [Ollama](https://ollama.com) installed on the host.
+
+```bash
+cp .env.example .env
+# Set BOT_TOKEN and change OLLAMA_URL to http://localhost:11434
+
+chmod +x run.sh
+./run.sh
+```
+
+`run.sh` starts Ollama if it isn't already running, pulls `phi3.5` on first run, creates the Python virtualenv, and launches the bot. Re-run it any time — it skips steps that are already done.
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -43,7 +57,7 @@ docker compose exec ollama ollama pull phi3.5
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `phi3.5` | Model to use |
 | `ALLOWED_USER_IDS` | _(empty = public)_ | Comma-separated Telegram user IDs |
-| `DB_PATH` | `/data/calories.db` | SQLite database path |
+| `DB_PATH` | `/data/app.db` | SQLite database path |
 
 ## Commands
 
