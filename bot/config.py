@@ -8,6 +8,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 BOT_TOKEN: str = os.environ["BOT_TOKEN"]
 OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://ollama:11434")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi3.5")
+OLLAMA_CHAT_MODEL: str = os.getenv("OLLAMA_CHAT_MODEL", OLLAMA_MODEL)
 
 _raw_ids = os.getenv("ALLOWED_USER_IDS", "").strip()
 ALLOWED_USER_IDS: set[int] = (

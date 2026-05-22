@@ -1,7 +1,8 @@
 import json
 import logging
+import re
 import httpx
-from config import OLLAMA_URL, OLLAMA_MODEL
+from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,23 @@ Return exactly one of:
 {{"type": "general"}}"""
 
 GENERAL_SYSTEM_PROMPT = (
-    "You are a calorie tracking bot assistant with a quirky, funny, slightly cringe personality. "
-    "You're having a casual conversation with the user. Keep replies short (1-3 sentences). "
-    "Be playful and respond directly to what they said. Mention food/calories only if it fits naturally."
+    "You are a nutritionist at a clinic front desk. Casual and a little witty, not clinical or formal. "
+    "Match the length of the user's message. Short message gets a short reply. Never pad or over-explain. "
+    "For food, diet, nutrition, exercise, or sleep questions: give a complete, useful answer. "
+    "For anything unrelated to health or food: give a short playful nudge back toward food or health. Never flat-out refuse. "
+    "No lists, no headers, no examples, no em dashes."
 )
+
+_GENERAL_FEW_SHOT = [
+    {"role": "user",      "content": "hey"},
+    {"role": "assistant", "content": "Hey, what's up?"},
+    {"role": "user",      "content": "good snack?"},
+    {"role": "assistant", "content": "Nuts or Greek yogurt. Quick, filling, won't wreck your blood sugar."},
+    {"role": "user",      "content": "is pizza bad for you?"},
+    {"role": "assistant", "content": "Not really. A slice or two is fine, just watch the portions."},
+    {"role": "user",      "content": "do you watch F1?"},
+    {"role": "assistant", "content": "Nah, but I know what those drivers eat. Got a food question?"},
+]
 
 FINALIZE_SYSTEM_PROMPT = (
     "You are a nutritionist assistant. Given a meal and the user's answers to clarifying questions, "
@@ -218,14 +232,26 @@ async def classify(text: str) -> dict:
     raise ValueError("Could not get a valid classification from the model.")
 
 
+def _first_paragraph(text: str) -> str:
+    cut = re.split(r"\n\s*\n(?=[-*]|\*\*|User:|Assistant:)", text, maxsplit=1)
+    return cut[0].strip()
+
+
 async def general_reply(text: str, history: "list[dict]") -> str:
-    messages = [{"role": "system", "content": GENERAL_SYSTEM_PROMPT}]
-    messages.extend(history)
-    messages.append({"role": "user", "content": text})
+    messages = (
+        [{"role": "system", "content": GENERAL_SYSTEM_PROMPT}]
+        + _GENERAL_FEW_SHOT
+        + list(history)
+        + [{"role": "user", "content": text}]
+    )
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": OLLAMA_CHAT_MODEL,
         "messages": messages,
         "stream": False,
+        "options": {
+            "stop": ["\n\nUser:", "\n\nAssistant:", "\n\n---", "\n\n**"],
+            "num_predict": 80,
+        },
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
@@ -233,7 +259,7 @@ async def general_reply(text: str, history: "list[dict]") -> str:
             resp.raise_for_status()
             content = resp.json()["message"]["content"]
             if isinstance(content, str) and content.strip():
-                return content.strip()
+                return _first_paragraph(content)
         except (KeyError, Exception) as e:
             logger.warning("general_reply() error: %s", e)
     raise ValueError("Could not get a general reply from the model.")
