@@ -24,6 +24,7 @@ from handlers.stats import (
     today_handler,
     week_handler,
     history_handler,
+    delete_handler,
     undo_handler,
     help_handler,
 )
@@ -66,6 +67,7 @@ def main() -> None:
     app.add_handler(CommandHandler("today", today_handler))
     app.add_handler(CommandHandler("week", week_handler))
     app.add_handler(CommandHandler("history", history_handler))
+    app.add_handler(CommandHandler("delete", delete_handler))
     app.add_handler(CommandHandler("undo", undo_handler))
     app.add_handler(CommandHandler("help", help_handler))
 

@@ -76,18 +76,57 @@ async def history_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if user_id is None:
         return
 
-    meals = await db.get_history(user_id)
+    limit = 10
+    if context.args:
+        try:
+            limit = max(1, min(50, int(context.args[0])))
+        except ValueError:
+            await update.message.reply_text("Usage: /history [count] (e.g. /history 20)")
+            return
+
+    meals = await db.get_history(user_id, limit=limit)
     if not meals:
         await update.message.reply_text("No meals logged yet.")
         return
 
     lines = ["Recent meals:"]
-    for m in meals:
+    for i, m in enumerate(meals, start=1):
         ts = datetime.fromisoformat(m["logged_at"]).strftime("%m/%d %H:%M")
         cal = _rng(m["calories_min"], m["calories_max"], " kcal")
-        lines.append(f"  [{ts}] {m['description']} — {cal}")
+        lines.append(f"  {i}. [{ts}] {m['description']} — {cal}")
+    lines.append("\nUse /delete [n] to remove an entry.")
 
     await update.message.reply_text("\n".join(lines))
+
+
+async def delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = await _get_user_id(update)
+    if user_id is None:
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /delete [n] — removes the nth most recent meal (1 = latest).")
+        return
+
+    try:
+        n = int(context.args[0])
+        if n < 1:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("Usage: /delete [n] — n must be a positive integer.")
+        return
+
+    meals = await db.get_history(user_id, limit=n)
+    if n > len(meals):
+        await update.message.reply_text(f"No entry #{n}.")
+        return
+
+    meal = meals[n - 1]
+    deleted = await db.delete_meal(meal["id"], user_id)
+    if deleted:
+        await update.message.reply_text(f'Removed #{n}: "{meal["description"]}"')
+    else:
+        await update.message.reply_text("Couldn't remove that meal.")
 
 
 async def undo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -112,7 +151,8 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Send any meal description to log it.\n\n"
         "/today — today's meals and totals\n"
         "/week — daily breakdown for the last 7 days\n"
-        "/history — last 10 meals\n"
+        "/history [n] — last n meals, numbered newest-first (default 10)\n"
+        "/delete [n] — remove the nth most recent meal\n"
         "/undo — remove the last logged meal\n"
         "/help — this message"
     )
