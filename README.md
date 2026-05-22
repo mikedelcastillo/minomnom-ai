@@ -57,7 +57,7 @@ chmod +x run.sh
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `phi3.5` | Model to use |
 | `ALLOWED_USER_IDS` | _(empty = public)_ | Comma-separated Telegram user IDs |
-| `DB_PATH` | `/data/app.db` | SQLite database path |
+| `DB_PATH` | `/data/calories.db` | SQLite database path |
 
 ## Commands
 
