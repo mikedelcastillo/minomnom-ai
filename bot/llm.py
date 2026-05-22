@@ -149,6 +149,24 @@ Return an estimate:
 
 All numbers must be integers."""
 
+CLARIFICATION_INTENT_SYSTEM_PROMPT = (
+    "You are an intent classifier for a meal-tracking bot. "
+    "The bot asked the user a clarifying question about a meal they logged. "
+    "Decide whether the user's reply is answering the question or cancelling/rejecting the tracking.\n"
+    "Return {\"intent\": \"cancel\"} for: cancellations ('cancel', 'stop', 'nevermind', 'never mind'), "
+    "corrections ('I didn't mean that', 'wrong', 'that's not food', 'I made a mistake', 'forget it'), "
+    "refusals ('no', 'nope', 'not really'), or anything suggesting the original message was not a meal log.\n"
+    "Return {\"intent\": \"answer\"} for: anything that genuinely answers the question asked.\n"
+    "Return only a JSON object, no markdown, no extra text."
+)
+
+CLARIFICATION_INTENT_PROMPT = """Question asked: "{question}"
+User reply: "{answer}"
+
+Return exactly one of:
+{{"intent": "answer"}}
+{{"intent": "cancel"}}"""
+
 REQUIRED_KEYS = {"calories", "protein_g", "carbs_g", "fat_g"}
 
 
@@ -366,6 +384,30 @@ async def analytics_summary(question: str, totals: dict, meal_count: int, today_
         except (KeyError, Exception) as e:
             logger.warning("analytics_summary() error: %s", e)
     raise ValueError("Could not get an analytics summary from the model.")
+
+
+async def classify_clarification_intent(question: str, answer: str) -> dict:
+    prompt = CLARIFICATION_INTENT_PROMPT.format(question=question, answer=answer)
+    payload = {
+        "model": OLLAMA_MODEL,
+        "system": CLARIFICATION_INTENT_SYSTEM_PROMPT,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for attempt in range(2):
+            try:
+                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
+                resp.raise_for_status()
+                raw = resp.json()["response"]
+                data = json.loads(raw)
+                if data.get("intent") in ("answer", "cancel"):
+                    return {"intent": data["intent"]}
+                logger.warning("classify_clarification_intent() invalid (attempt %d): %s", attempt + 1, raw)
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("classify_clarification_intent() parse error (attempt %d): %s", attempt + 1, e)
+    return {"intent": "answer"}
 
 
 async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> dict:
