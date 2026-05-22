@@ -1,0 +1,19 @@
+services:
+  ollama:
+    image: ollama/ollama
+    runtime: nvidia
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  bot:
+    build: ./bot
+    env_file: .env
+    volumes:
+      - ./data:/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
