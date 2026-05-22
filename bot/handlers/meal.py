@@ -235,7 +235,17 @@ async def meal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def clarification_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await _process_clarification(update, context, update.message.text.strip())
+    text = update.message.text.strip()
+    pending = context.user_data.get("pending")
+    if pending:
+        idx = pending["current_q_idx"]
+        current_q = pending["planned_questions"][idx]["question"] if idx < len(pending["planned_questions"]) else ""
+        intent = await llm.classify_clarification_intent(current_q, text)
+        if intent["intent"] == "cancel":
+            context.user_data.pop("pending", None)
+            await update.message.reply_text("No problem, I've cancelled that. Send a new meal whenever you're ready.")
+            return ConversationHandler.END
+    return await _process_clarification(update, context, text)
 
 
 async def clarification_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
