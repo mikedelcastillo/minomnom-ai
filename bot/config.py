@@ -16,7 +16,7 @@ ALLOWED_USER_IDS: set[int] = (
     else set()
 )
 
-_db_raw = os.getenv("DB_PATH", "/data/calories.db")
+_db_raw = os.getenv("DB_PATH", "/data/app.db")
 # Resolve relative paths from project root (parent of this file's directory)
 DB_PATH: str = str(
     (Path(__file__).parent.parent / _db_raw).resolve()
