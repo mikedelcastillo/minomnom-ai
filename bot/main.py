@@ -39,6 +39,7 @@ async def post_init(application: Application) -> None:
 
 
 def main() -> None:
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -57,6 +58,7 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_user=True,
         per_chat=True,
+        per_message=False,
     )
 
     app.add_handler(CallbackQueryHandler(delete_meal_callback, pattern=r"^del:\d+$"))

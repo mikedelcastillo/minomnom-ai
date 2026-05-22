@@ -26,8 +26,8 @@ if ! ollama list | grep -q "^$MODEL"; then
   ollama pull "$MODEL"
 fi
 
-# Create virtualenv if missing or broken (e.g. project was moved)
-if [ ! -d "$VENV" ] || ! "$VENV/bin/python" -c "" &>/dev/null; then
+# Create virtualenv if missing or broken (e.g. project was moved/renamed)
+if [ ! -d "$VENV" ] || ! "$VENV/bin/python" -c "" &>/dev/null || ! "$VENV/bin/pip" --version &>/dev/null; then
   echo "Creating virtualenv..."
   rm -rf "$VENV"
   python3 -m venv "$VENV"
