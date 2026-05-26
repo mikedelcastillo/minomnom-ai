@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the bot
 
 ```bash
-# Local development (single command — starts Ollama, pulls model, runs bot)
+# Local development (requires Ollama already running on localhost:11434)
 ./run.sh
 
 # Or manually (requires Ollama already running on localhost:11434)
