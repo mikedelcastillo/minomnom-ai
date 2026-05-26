@@ -42,6 +42,4 @@ fi
 # Install / sync dependencies
 "$VENV/bin/pip" install -q -r bot/requirements.txt
 
-# Launch bot — default OLLAMA_URL to localhost for non-Docker dev
-export OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 exec "$VENV/bin/python" bot/main.py
