@@ -44,13 +44,21 @@ async def post_init(application: Application) -> None:
 
 
 async def run_webhook(app: Application) -> None:
+    if not config.WEBHOOK_URL:
+        raise ValueError("WEBHOOK_URL must be set when USE_WEBHOOK=true")
+
     await app.initialize()
     await app.start()
-    await app.bot.set_webhook(url=f"{config.WEBHOOK_URL}/telegram")
 
     async def telegram_handler(request: web.Request) -> web.Response:
-        data = await request.json()
+        if config.WEBHOOK_SECRET:
+            token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+            if token != config.WEBHOOK_SECRET:
+                return web.Response(status=403)
+        data = await request.json(content_type=None)
         update = Update.de_json(data, app.bot)
+        if update is None:
+            return web.Response()
         await app.process_update(update)
         return web.Response()
 
@@ -63,18 +71,27 @@ async def run_webhook(app: Application) -> None:
 
     runner = web.AppRunner(aio_app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", config.PORT)
-    await site.start()
+    try:
+        site = web.TCPSite(runner, "0.0.0.0", config.PORT)
+        await site.start()
 
-    stop_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop_event.set)
+        await app.bot.set_webhook(url=f"{config.WEBHOOK_URL}/telegram")
 
-    await stop_event.wait()
-    await runner.cleanup()
-    await app.stop()
-    await app.shutdown()
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        try:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, stop_event.set)
+        except NotImplementedError:
+            pass  # Windows ProactorEventLoop does not support add_signal_handler
+
+        await stop_event.wait()
+    finally:
+        try:
+            await app.stop()
+            await app.shutdown()
+        finally:
+            await runner.cleanup()
 
 
 def main() -> None:
