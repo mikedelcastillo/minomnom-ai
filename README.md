@@ -39,7 +39,36 @@ docker compose exec ollama ollama pull phi3.5
 
 If you already run Ollama on Unraid, this is the cheapest and lowest-latency option — the bot talks to Ollama directly over localhost.
 
+Pre-built images are published to GitHub Container Registry on every push to `main`:
+
+```
+ghcr.io/mikedelcastillo/minomnom-ai:latest
+```
+
 **Prerequisites:** Ollama is running on the same Unraid machine (e.g. via Community Applications).
+
+### Via Unraid Docker GUI
+
+1. Go to **Docker** tab → **Add Container**
+2. Set **Repository** to `ghcr.io/mikedelcastillo/minomnom-ai:latest`
+3. Set **Network type** to `Host`
+4. Add a **Path**: Container path `/data` → Host path `/mnt/user/appdata/minomnom-ai`
+5. Add the following **Variables**:
+
+| Name | Value |
+|---|---|
+| `BOT_TOKEN` | your Telegram bot token |
+| `OLLAMA_URL` | `http://localhost:11434` |
+| `OLLAMA_MODEL` | `phi3.5` |
+| `ALLOWED_USER_IDS` | your Telegram user ID |
+
+6. Click **Apply** — Unraid pulls the image and starts the bot.
+
+Data is persisted at `/mnt/user/appdata/minomnom-ai/app.db`.
+
+To update, click the container → **Update** in the Unraid Docker UI.
+
+### Via Docker Compose (terminal)
 
 ```bash
 # Clone the repo somewhere on Unraid (e.g. /mnt/user/data/minomnom-ai)
@@ -47,30 +76,17 @@ git clone https://github.com/mikedelcastillo/minomnom-ai.git
 cd minomnom-ai
 
 cp .env.example .env
+# Edit .env: set BOT_TOKEN, OLLAMA_URL=http://localhost:11434, ALLOWED_USER_IDS
 ```
-
-Edit `.env` — at minimum set these:
-
-```
-BOT_TOKEN=your_telegram_bot_token_here
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=phi3.5
-ALLOWED_USER_IDS=your_telegram_user_id
-```
-
-Start the bot (bot-only compose file — no Ollama service, since it's already running):
 
 ```bash
-docker compose -f docker-compose.unraid.yml up -d --build
+docker compose -f docker-compose.unraid.yml up -d
 ```
-
-Data is persisted at `/mnt/user/appdata/minomnom-ai/app.db`.
 
 **To update:**
 
 ```bash
-git pull
-docker compose -f docker-compose.unraid.yml up -d --build
+docker compose -f docker-compose.unraid.yml pull && docker compose -f docker-compose.unraid.yml up -d
 ```
 
 ## Local development (no Docker)

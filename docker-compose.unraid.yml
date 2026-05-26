@@ -1,6 +1,6 @@
 services:
   bot:
-    build: ./bot
+    image: ghcr.io/mikedelcastillo/minomnom-ai:latest
     env_file: .env
     volumes:
       - /mnt/user/appdata/minomnom-ai:/data
