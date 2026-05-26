@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
@@ -13,6 +15,34 @@ from config import ALLOWED_USER_IDS
 logger = logging.getLogger(__name__)
 
 CLARIFYING = 1
+
+
+@asynccontextmanager
+async def keep_typing(chat):
+    # Telegram's typing indicator expires after ~5s; refresh it while LLM calls run.
+    # Transient send_action failures must not kill the loop — keep retrying so the
+    # user keeps seeing activity for the full duration of a long LLM call.
+    async def loop():
+        while True:
+            try:
+                await chat.send_action(ChatAction.TYPING)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug("keep_typing: send_action failed (%s); will retry", e)
+            await asyncio.sleep(4)
+
+    task = asyncio.create_task(loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("keep_typing task crashed")
 
 
 def _window_to_datetimes(window: dict) -> tuple[str, str]:
@@ -123,8 +153,6 @@ async def _process_clarification(
     pending["clarifications"].append(answer)
     pending["current_q_idx"] += 1
 
-    await update.effective_chat.send_action(ChatAction.TYPING)
-
     idx = pending["current_q_idx"]
     if idx < len(pending["planned_questions"]):
         next_q = pending["planned_questions"][idx]
@@ -132,22 +160,23 @@ async def _process_clarification(
         await update.effective_message.reply_text(next_q["question"], reply_markup=keyboard)
         return CLARIFYING
 
-    try:
-        result = await llm.finalize(
-            pending["original"],
-            pending["planned_questions"],
-            pending["clarifications"],
-        )
-    except ValueError:
-        await update.effective_message.reply_text("Sorry, I couldn't process that. Try again.")
+    async with keep_typing(update.effective_chat):
+        try:
+            result = await llm.finalize(
+                pending["original"],
+                pending["planned_questions"],
+                pending["clarifications"],
+            )
+        except ValueError:
+            await update.effective_message.reply_text("Sorry, I couldn't process that. Try again.")
+            context.user_data.pop("pending", None)
+            return ConversationHandler.END
+
+        user = update.effective_user
+        user_id = await db.upsert_user(user.id, user.full_name)
+        await _log_and_reply(update, user_id, pending["original"], result)
         context.user_data.pop("pending", None)
         return ConversationHandler.END
-
-    user = update.effective_user
-    user_id = await db.upsert_user(user.id, user.full_name)
-    await _log_and_reply(update, user_id, pending["original"], result)
-    context.user_data.pop("pending", None)
-    return ConversationHandler.END
 
 
 async def meal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -159,79 +188,78 @@ async def meal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not text:
         return ConversationHandler.END
 
-    await update.message.chat.send_action(ChatAction.TYPING)
+    async with keep_typing(update.message.chat):
+        try:
+            classification = await llm.classify(text)
+        except ValueError:
+            await update.message.reply_text("Sorry, I couldn't process that. Try again.")
+            return ConversationHandler.END
 
-    try:
-        classification = await llm.classify(text)
-    except ValueError:
-        await update.message.reply_text("Sorry, I couldn't process that. Try again.")
-        return ConversationHandler.END
+        if classification["type"] == "analytics":
+            user_id = await db.upsert_user(user.id, user.full_name)
+            try:
+                window = await llm.extract_time_window(text)
+            except Exception:
+                window = {"window": "today"}
+            since_dt, until_dt = _window_to_datetimes(window)
+            meals = await db.get_meals_in_window(user_id, since_dt, until_dt)
+            label = _window_label(window)
+            if not meals:
+                await update.message.reply_text(f"No meals logged for {label.lower()}.")
+                return ConversationHandler.END
+            totals = _sum_meals_macros(meals)
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            try:
+                summary = await llm.analytics_summary(text, totals, len(meals), today_str)
+            except ValueError:
+                summary = f"{len(meals)} meal(s) logged."
+            reply = "\n".join([
+                label,
+                f"Calories:  {_format_range(*totals['calories'], ' kcal')}",
+                f"Protein:   {_format_range(*totals['protein_g'], ' g')}",
+                f"Carbs:     {_format_range(*totals['carbs_g'], ' g')}",
+                f"Fat:       {_format_range(*totals['fat_g'], ' g')}",
+                "",
+                summary,
+            ])
+            await update.message.reply_text(reply)
+            return ConversationHandler.END
 
-    if classification["type"] == "analytics":
+        if classification["type"] == "general":
+            history = context.user_data.get("general_history", [])
+            try:
+                reply = await llm.general_reply(text, history)
+            except ValueError:
+                await update.message.reply_text("Something went wrong. Try again!")
+                return ConversationHandler.END
+            await update.message.reply_text(reply)
+            history.append({"role": "user", "content": text})
+            history.append({"role": "assistant", "content": reply})
+            context.user_data["general_history"] = history[-40:]
+            return ConversationHandler.END
+
+        try:
+            result = await llm.plan(text)
+        except ValueError:
+            await update.message.reply_text("Sorry, I couldn't process that. Try again.")
+            return ConversationHandler.END
+
+        if result["type"] == "questions":
+            planned_qs = result["questions"]
+            first_q = planned_qs[0]
+            context.user_data["pending"] = {
+                "original": text,
+                "planned_questions": planned_qs,
+                "clarifications": [],
+                "current_q_idx": 0,
+            }
+            keyboard = _question_keyboard(first_q.get("options", []))
+            await update.message.reply_text(first_q["question"], reply_markup=keyboard)
+            return CLARIFYING
+
         user_id = await db.upsert_user(user.id, user.full_name)
-        try:
-            window = await llm.extract_time_window(text)
-        except Exception:
-            window = {"window": "today"}
-        since_dt, until_dt = _window_to_datetimes(window)
-        meals = await db.get_meals_in_window(user_id, since_dt, until_dt)
-        label = _window_label(window)
-        if not meals:
-            await update.message.reply_text(f"No meals logged for {label.lower()}.")
-            return ConversationHandler.END
-        totals = _sum_meals_macros(meals)
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        try:
-            summary = await llm.analytics_summary(text, totals, len(meals), today_str)
-        except ValueError:
-            summary = f"{len(meals)} meal(s) logged."
-        reply = "\n".join([
-            label,
-            f"Calories:  {_format_range(*totals['calories'], ' kcal')}",
-            f"Protein:   {_format_range(*totals['protein_g'], ' g')}",
-            f"Carbs:     {_format_range(*totals['carbs_g'], ' g')}",
-            f"Fat:       {_format_range(*totals['fat_g'], ' g')}",
-            "",
-            summary,
-        ])
-        await update.message.reply_text(reply)
+        await _log_and_reply(update, user_id, text, result)
         return ConversationHandler.END
-
-    if classification["type"] == "general":
-        history = context.user_data.get("general_history", [])
-        try:
-            reply = await llm.general_reply(text, history)
-        except ValueError:
-            await update.message.reply_text("Something went wrong. Try again!")
-            return ConversationHandler.END
-        await update.message.reply_text(reply)
-        history.append({"role": "user", "content": text})
-        history.append({"role": "assistant", "content": reply})
-        context.user_data["general_history"] = history[-40:]
-        return ConversationHandler.END
-
-    try:
-        result = await llm.plan(text)
-    except ValueError:
-        await update.message.reply_text("Sorry, I couldn't process that. Try again.")
-        return ConversationHandler.END
-
-    if result["type"] == "questions":
-        planned_qs = result["questions"]
-        first_q = planned_qs[0]
-        context.user_data["pending"] = {
-            "original": text,
-            "planned_questions": planned_qs,
-            "clarifications": [],
-            "current_q_idx": 0,
-        }
-        keyboard = _question_keyboard(first_q.get("options", []))
-        await update.message.reply_text(first_q["question"], reply_markup=keyboard)
-        return CLARIFYING
-
-    user_id = await db.upsert_user(user.id, user.full_name)
-    await _log_and_reply(update, user_id, text, result)
-    return ConversationHandler.END
 
 
 async def clarification_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -240,7 +268,8 @@ async def clarification_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if pending:
         idx = pending["current_q_idx"]
         current_q = pending["planned_questions"][idx]["question"] if idx < len(pending["planned_questions"]) else ""
-        intent = await llm.classify_clarification_intent(current_q, text)
+        async with keep_typing(update.effective_chat):
+            intent = await llm.classify_clarification_intent(current_q, text)
         if intent["intent"] == "cancel":
             context.user_data.pop("pending", None)
             await update.message.reply_text("No problem, I've cancelled that. Send a new meal whenever you're ready.")

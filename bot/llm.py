@@ -244,8 +244,8 @@ async def plan(meal: str) -> dict:
                 if result is not None:
                     return result
                 logger.warning("plan() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning("plan() parse error (attempt %d): %s", attempt + 1, e)
+            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                logger.warning("plan() request/parse error (attempt %d): %s", attempt + 1, e)
     raise ValueError("Could not get a valid plan from the model.")
 
 
@@ -269,8 +269,8 @@ async def classify(text: str) -> dict:
                 if t in ("tracking", "analytics", "general"):
                     return {"type": t}
                 logger.warning("classify() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning("classify() parse error (attempt %d): %s", attempt + 1, e)
+            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                logger.warning("classify() request/parse error (attempt %d): %s", attempt + 1, e)
     raise ValueError("Could not get a valid classification from the model.")
 
 
@@ -341,8 +341,8 @@ async def extract_time_window(text: str) -> dict:
                 if result is not None:
                     return result
                 logger.warning("extract_time_window() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning("extract_time_window() parse error (attempt %d): %s", attempt + 1, e)
+            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                logger.warning("extract_time_window() request/parse error (attempt %d): %s", attempt + 1, e)
     # Safe fallback: today
     return {"window": "today"}
 
@@ -405,8 +405,8 @@ async def classify_clarification_intent(question: str, answer: str) -> dict:
                 if data.get("intent") in ("answer", "cancel"):
                     return {"intent": data["intent"]}
                 logger.warning("classify_clarification_intent() invalid (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning("classify_clarification_intent() parse error (attempt %d): %s", attempt + 1, e)
+            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s", attempt + 1, e)
     return {"intent": "answer"}
 
 
@@ -438,6 +438,6 @@ async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> 
                     if normalized is not None:
                         return normalized
                 logger.warning("finalize() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning("finalize() parse error (attempt %d): %s", attempt + 1, e)
+            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+                logger.warning("finalize() request/parse error (attempt %d): %s", attempt + 1, e)
     raise ValueError("Could not get a valid estimate from the model.")
