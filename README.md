@@ -60,25 +60,27 @@ Data is persisted at `/mnt/user/appdata/minomnom-ai/app.db`.
 
 To update, click the container → **Update** in the Unraid Docker UI.
 
-### Via Docker Compose (terminal)
+### Via terminal
 
 ```bash
-# Clone the repo somewhere on Unraid (e.g. /mnt/user/data/minomnom-ai)
-git clone https://github.com/mikedelcastillo/minomnom-ai.git
-cd minomnom-ai
-
-cp .env.example .env
-# Edit .env: set BOT_TOKEN, OLLAMA_URL=http://localhost:11434, ALLOWED_USER_IDS
-```
-
-```bash
-docker compose -f docker-compose.unraid.yml up -d
+docker run -d \
+  --name minomnom-ai \
+  --network host \
+  -v /mnt/user/appdata/minomnom-ai:/data \
+  -e BOT_TOKEN=your_token \
+  -e OLLAMA_URL=http://localhost:11434 \
+  -e OLLAMA_MODEL=phi3.5 \
+  -e ALLOWED_USER_IDS=your_telegram_user_id \
+  --restart unless-stopped \
+  ghcr.io/mikedelcastillo/minomnom-ai:latest
 ```
 
 **To update:**
 
 ```bash
-docker compose -f docker-compose.unraid.yml pull && docker compose -f docker-compose.unraid.yml up -d
+docker pull ghcr.io/mikedelcastillo/minomnom-ai:latest
+docker rm -f minomnom-ai
+# re-run the docker run command above
 ```
 
 ## Local development (no Docker)

@@ -11,9 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Or manually (requires Ollama already running on localhost:11434)
 cd bot && python main.py
 
-# Unraid (pulls pre-built image from GHCR)
-docker compose -f docker-compose.unraid.yml up -d
-docker compose -f docker-compose.unraid.yml logs -f bot
+# Unraid (pulls pre-built image from GHCR — see README for full docker run command)
+docker pull ghcr.io/mikedelcastillo/minomnom-ai:latest
 ```
 
 ## Local development setup
