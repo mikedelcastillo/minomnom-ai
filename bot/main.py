@@ -94,18 +94,26 @@ async def run_webhook(app: Application) -> None:
         if config.WEBHOOK_SECRET:
             token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
             if token != config.WEBHOOK_SECRET:
+                log.warning(
+                    "Rejected /telegram POST from %s: bad or missing secret_token",
+                    request.remote,
+                )
                 return web.Response(status=403)
         try:
             data = await request.json()
         except Exception:
+            log.warning("Rejected /telegram POST from %s: invalid JSON body", request.remote)
             return web.Response(status=400)
         update = Update.de_json(data, app.bot)
         if update is None:
+            log.debug("Ignored /telegram POST from %s: payload not recognised as Update", request.remote)
             return web.Response()
+        log.info("Received Telegram update %s", update.update_id)
         await app.process_update(update)
         return web.Response()
 
-    async def health(_request: web.Request) -> web.Response:
+    async def health(request: web.Request) -> web.Response:
+        log.debug("Health check from %s", request.remote)
         return web.Response(text="ok")
 
     aio_app = web.Application()
