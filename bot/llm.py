@@ -5,6 +5,7 @@ import httpx
 from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL
 
 logger = logging.getLogger(__name__)
+logger.info("Ollama endpoint: %s  model: %s  chat model: %s", OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL)
 
 PLAN_SYSTEM_PROMPT = (
     "You are a nutritionist assistant helping someone casually track their meals. "
@@ -245,7 +246,7 @@ async def plan(meal: str) -> dict:
                     return result
                 logger.warning("plan() invalid response (attempt %d): %s", attempt + 1, raw)
             except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("plan() request/parse error (attempt %d): %s", attempt + 1, e)
+                logger.warning("plan() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     raise ValueError("Could not get a valid plan from the model.")
 
 
@@ -270,7 +271,7 @@ async def classify(text: str) -> dict:
                     return {"type": t}
                 logger.warning("classify() invalid response (attempt %d): %s", attempt + 1, raw)
             except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("classify() request/parse error (attempt %d): %s", attempt + 1, e)
+                logger.warning("classify() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     raise ValueError("Could not get a valid classification from the model.")
 
 
@@ -342,7 +343,7 @@ async def extract_time_window(text: str) -> dict:
                     return result
                 logger.warning("extract_time_window() invalid response (attempt %d): %s", attempt + 1, raw)
             except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("extract_time_window() request/parse error (attempt %d): %s", attempt + 1, e)
+                logger.warning("extract_time_window() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     # Safe fallback: today
     return {"window": "today"}
 
@@ -406,7 +407,7 @@ async def classify_clarification_intent(question: str, answer: str) -> dict:
                     return {"intent": data["intent"]}
                 logger.warning("classify_clarification_intent() invalid (attempt %d): %s", attempt + 1, raw)
             except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s", attempt + 1, e)
+                logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     return {"intent": "answer"}
 
 
@@ -439,5 +440,5 @@ async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> 
                         return normalized
                 logger.warning("finalize() invalid response (attempt %d): %s", attempt + 1, raw)
             except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("finalize() request/parse error (attempt %d): %s", attempt + 1, e)
+                logger.warning("finalize() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     raise ValueError("Could not get a valid estimate from the model.")
