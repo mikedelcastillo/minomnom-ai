@@ -15,7 +15,7 @@ Send any message like _"had a chicken sandwich and a coke"_ and the bot classifi
 - **Conversation commands** — `/today`, `/week`, `/history`, `/undo`
 - **One-tap delete** — inline Delete button on every logged meal
 - **User allowlist** — optional whitelist to keep the bot private
-- **Docker Compose** deployment — bot + Ollama as a two-service stack with NVIDIA GPU support
+- **Unraid-ready** — pre-built image on GHCR, installable via Unraid Docker GUI with no terminal needed
 
 ## Stack
 
@@ -25,15 +25,7 @@ Send any message like _"had a chicken sandwich and a coke"_ and the bot classifi
 
 ## Quick start
 
-```bash
-cp .env.example .env
-# fill in BOT_TOKEN (from @BotFather) and optionally ALLOWED_USER_IDS
-
-docker compose up -d
-
-# pull the model on first run
-docker compose exec ollama ollama pull phi3.5
-```
+See **[Deploying on Unraid](#deploying-on-unraid)** for the recommended deployment path, or **[Local development](#local-development-no-docker)** to run without Docker.
 
 ## Deploying on Unraid
 

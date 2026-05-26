@@ -11,10 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Or manually (requires Ollama already running on localhost:11434)
 cd bot && python main.py
 
-# Docker Compose (production-style)
-docker compose up -d
-docker compose exec ollama ollama pull phi3.5   # first run only
-docker compose logs -f bot
+# Unraid (pulls pre-built image from GHCR)
+docker compose -f docker-compose.unraid.yml up -d
+docker compose -f docker-compose.unraid.yml logs -f bot
 ```
 
 ## Local development setup
