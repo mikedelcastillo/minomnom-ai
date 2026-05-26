@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import signal
 
+from aiohttp import web
+from telegram import Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -40,8 +43,41 @@ async def post_init(application: Application) -> None:
     await db.init_db()
 
 
+async def run_webhook(app: Application) -> None:
+    await app.initialize()
+    await app.start()
+    await app.bot.set_webhook(url=f"{config.WEBHOOK_URL}/telegram")
+
+    async def telegram_handler(request: web.Request) -> web.Response:
+        data = await request.json()
+        update = Update.de_json(data, app.bot)
+        await app.process_update(update)
+        return web.Response()
+
+    async def health(_request: web.Request) -> web.Response:
+        return web.Response(text="ok")
+
+    aio_app = web.Application()
+    aio_app.router.add_post("/telegram", telegram_handler)
+    aio_app.router.add_get("/health", health)
+
+    runner = web.AppRunner(aio_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", config.PORT)
+    await site.start()
+
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop_event.set)
+
+    await stop_event.wait()
+    await runner.cleanup()
+    await app.stop()
+    await app.shutdown()
+
+
 def main() -> None:
-    asyncio.set_event_loop(asyncio.new_event_loop())
     app = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -73,18 +109,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_handler))
 
     if config.USE_WEBHOOK:
-        from aiohttp import web
-
-        async def health(_request: web.Request) -> web.Response:
-            return web.Response(text="ok")
-
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=config.PORT,
-            webhook_url=f"{config.WEBHOOK_URL}/telegram",
-            url_path="/telegram",
-            custom_routes=[web.get("/health", health)],
-        )
+        asyncio.run(run_webhook(app))
     else:
         app.run_polling()
 
