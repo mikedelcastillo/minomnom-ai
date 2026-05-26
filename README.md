@@ -107,7 +107,8 @@ chmod +x run.sh
 | `ALLOWED_USER_IDS` | _(empty = public)_ | Comma-separated Telegram user IDs |
 | `DB_PATH` | `/data/app.db` | SQLite database path |
 | `USE_WEBHOOK` | `false` | Set `true` to use Telegram webhooks instead of polling |
-| `WEBHOOK_URL` | _(empty)_ | Public HTTPS base URL for webhook mode (e.g. `https://myapp.railway.app`) |
+| `WEBHOOK_URL` | _(empty)_ | Public HTTPS base URL for webhook mode — no trailing slash, no path. The bot appends `/telegram` itself. Example: `https://bot.example.com` |
+| `WEBHOOK_SECRET` | _(empty)_ | Optional shared secret. When set, the bot registers it with Telegram and rejects any `/telegram` POST whose `X-Telegram-Bot-Api-Secret-Token` header doesn't match |
 | `PORT` | `8080` | Port to listen on in webhook mode |
 
 ## Commands

@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import re
 import signal
+from urllib.parse import urlparse
 
 from aiohttp import web
 from telegram import Update
@@ -43,9 +45,47 @@ async def post_init(application: Application) -> None:
     await db.init_db()
 
 
-async def run_webhook(app: Application) -> None:
+# Telegram's allowed character set for secret_token (see https://core.telegram.org/bots/api#setwebhook)
+_SECRET_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+
+
+def _validate_webhook_config() -> None:
     if not config.WEBHOOK_URL:
         raise ValueError("WEBHOOK_URL must be set when USE_WEBHOOK=true")
+    parsed = urlparse(config.WEBHOOK_URL)
+    if parsed.scheme.lower() != "https":
+        raise ValueError(
+            f"WEBHOOK_URL must use the https:// scheme (got {config.WEBHOOK_URL!r}); "
+            "Telegram requires HTTPS for webhooks"
+        )
+    if not parsed.netloc:
+        raise ValueError(f"WEBHOOK_URL must include a host (got {config.WEBHOOK_URL!r})")
+    if parsed.username or parsed.password:
+        raise ValueError(
+            "WEBHOOK_URL must not embed credentials (user:pass@host); they would leak to logs"
+        )
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError(
+            f"WEBHOOK_URL must be a base URL with no path/query/fragment (got {config.WEBHOOK_URL!r}); "
+            "the bot appends /telegram itself"
+        )
+    if config.WEBHOOK_SECRET and not _SECRET_TOKEN_RE.match(config.WEBHOOK_SECRET):
+        raise ValueError(
+            "WEBHOOK_SECRET must be 1-256 chars from [A-Za-z0-9_-] "
+            "(Telegram's setWebhook secret_token rules)"
+        )
+
+
+async def run_webhook(app: Application) -> None:
+    _validate_webhook_config()
+    log = logging.getLogger(__name__)
+    if not config.WEBHOOK_SECRET:
+        log.warning(
+            "WEBHOOK_SECRET is empty in webhook mode. "
+            "set_webhook will clear any pre-existing Telegram-side secret, "
+            "and incoming /telegram POSTs will be accepted without authentication. "
+            "Set WEBHOOK_SECRET to enable spoofing protection."
+        )
 
     await app.initialize()
     await app.start()
@@ -78,7 +118,20 @@ async def run_webhook(app: Application) -> None:
         site = web.TCPSite(runner, "0.0.0.0", config.PORT)
         await site.start()
 
-        await app.bot.set_webhook(url=f"{config.WEBHOOK_URL}/telegram")
+        webhook_url = f"{config.WEBHOOK_URL}/telegram"
+        try:
+            await app.bot.set_webhook(
+                url=webhook_url,
+                secret_token=config.WEBHOOK_SECRET or None,
+            )
+        except Exception:
+            log.exception("Failed to register Telegram webhook at %s", webhook_url)
+            raise
+        log.info(
+            "Registered Telegram webhook at %s (secret_token=%s)",
+            webhook_url,
+            "set" if config.WEBHOOK_SECRET else "NONE — endpoint accepts unauthenticated POSTs",
+        )
 
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
