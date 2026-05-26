@@ -45,6 +45,16 @@ async def post_init(application: Application) -> None:
     await db.init_db()
 
 
+async def on_error(update: object, context) -> None:
+    log = logging.getLogger(__name__)
+    log.exception("Unhandled handler error", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message is not None:
+        try:
+            await update.effective_message.reply_text("Something went wrong. Try again!")
+        except Exception:
+            log.exception("Failed to send error reply to user")
+
+
 # Telegram's allowed character set for secret_token (see https://core.telegram.org/bots/api#setwebhook)
 _SECRET_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
@@ -90,6 +100,8 @@ async def run_webhook(app: Application) -> None:
     await app.initialize()
     await app.start()
 
+    pending_updates: set[asyncio.Task] = set()
+
     async def telegram_handler(request: web.Request) -> web.Response:
         if config.WEBHOOK_SECRET:
             token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -109,7 +121,10 @@ async def run_webhook(app: Application) -> None:
             log.debug("Ignored /telegram POST from %s: payload not recognised as Update", request.remote)
             return web.Response()
         log.info("Received Telegram update %s", update.update_id)
-        await app.process_update(update)
+        # Ack Telegram immediately so it doesn't retry while the LLM pipeline runs.
+        task = asyncio.create_task(app.process_update(update))
+        pending_updates.add(task)
+        task.add_done_callback(pending_updates.discard)
         return web.Response()
 
     async def health(request: web.Request) -> web.Response:
@@ -155,6 +170,9 @@ async def run_webhook(app: Application) -> None:
             await app.stop()
             await app.shutdown()
         finally:
+            if pending_updates:
+                log.info("Waiting up to 10s for %d in-flight update(s)", len(pending_updates))
+                await asyncio.wait(pending_updates, timeout=10)
             await runner.cleanup()
 
 
@@ -182,6 +200,7 @@ def main() -> None:
 
     app.add_handler(CallbackQueryHandler(delete_meal_callback, pattern=r"^del:\d+$"))
     app.add_handler(meal_conv)
+    app.add_error_handler(on_error)
     app.add_handler(CommandHandler("today", today_handler))
     app.add_handler(CommandHandler("week", week_handler))
     app.add_handler(CommandHandler("history", history_handler))
