@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 BOT_TOKEN: str = os.environ["BOT_TOKEN"]
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi3.5")
 OLLAMA_CHAT_MODEL: str = os.getenv("OLLAMA_CHAT_MODEL", OLLAMA_MODEL)
 
