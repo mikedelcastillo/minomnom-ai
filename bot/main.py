@@ -47,7 +47,12 @@ async def post_init(application: Application) -> None:
 
 async def on_error(update: object, context) -> None:
     log = logging.getLogger(__name__)
-    log.exception("Unhandled handler error", exc_info=context.error)
+    log.error("Unhandled handler error", exc_info=context.error)
+    # Clear stale clarification state so a failed CLARIFYING flow doesn't
+    # poison the user's next message by routing it back into the conversation.
+    user_data = getattr(context, "user_data", None)
+    if isinstance(user_data, dict):
+        user_data.pop("pending", None)
     if isinstance(update, Update) and update.effective_message is not None:
         try:
             await update.effective_message.reply_text("Something went wrong. Try again!")
@@ -102,6 +107,14 @@ async def run_webhook(app: Application) -> None:
 
     pending_updates: set[asyncio.Task] = set()
 
+    def _on_update_task_done(task: asyncio.Task) -> None:
+        pending_updates.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error("Unhandled exception in process_update task", exc_info=exc)
+
     async def telegram_handler(request: web.Request) -> web.Response:
         if config.WEBHOOK_SECRET:
             token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -124,7 +137,7 @@ async def run_webhook(app: Application) -> None:
         # Ack Telegram immediately so it doesn't retry while the LLM pipeline runs.
         task = asyncio.create_task(app.process_update(update))
         pending_updates.add(task)
-        task.add_done_callback(pending_updates.discard)
+        task.add_done_callback(_on_update_task_done)
         return web.Response()
 
     async def health(request: web.Request) -> web.Response:
@@ -166,13 +179,22 @@ async def run_webhook(app: Application) -> None:
 
         await stop_event.wait()
     finally:
+        # Drain in-flight tasks BEFORE shutting down the Application so
+        # handlers can still reach app.bot to deliver replies. Cancel any
+        # task that overruns the deadline and gather them so the loop
+        # doesn't close with pending work.
+        if pending_updates:
+            log.info("Waiting up to 10s for %d in-flight update(s)", len(pending_updates))
+            done, still_pending = await asyncio.wait(pending_updates, timeout=10)
+            if still_pending:
+                log.warning("Cancelling %d update task(s) that overran the drain deadline", len(still_pending))
+                for t in still_pending:
+                    t.cancel()
+                await asyncio.gather(*still_pending, return_exceptions=True)
         try:
             await app.stop()
             await app.shutdown()
         finally:
-            if pending_updates:
-                log.info("Waiting up to 10s for %d in-flight update(s)", len(pending_updates))
-                await asyncio.wait(pending_updates, timeout=10)
             await runner.cleanup()
 
 

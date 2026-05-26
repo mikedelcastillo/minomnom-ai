@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -21,12 +20,16 @@ CLARIFYING = 1
 @asynccontextmanager
 async def keep_typing(chat):
     # Telegram's typing indicator expires after ~5s; refresh it while LLM calls run.
+    # Transient send_action failures must not kill the loop — keep retrying so the
+    # user keeps seeing activity for the full duration of a long LLM call.
     async def loop():
         while True:
             try:
                 await chat.send_action(ChatAction.TYPING)
-            except Exception:
-                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug("keep_typing: send_action failed (%s); will retry", e)
             await asyncio.sleep(4)
 
     task = asyncio.create_task(loop())
@@ -34,8 +37,12 @@ async def keep_typing(chat):
         yield
     finally:
         task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
+        try:
             await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("keep_typing task crashed")
 
 
 def _window_to_datetimes(window: dict) -> tuple[str, str]:
