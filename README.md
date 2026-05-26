@@ -35,6 +35,44 @@ docker compose up -d
 docker compose exec ollama ollama pull phi3.5
 ```
 
+## Deploying on Unraid
+
+If you already run Ollama on Unraid, this is the cheapest and lowest-latency option — the bot talks to Ollama directly over localhost.
+
+**Prerequisites:** Ollama is running on the same Unraid machine (e.g. via Community Applications).
+
+```bash
+# Clone the repo somewhere on Unraid (e.g. /mnt/user/data/minomnom-ai)
+git clone https://github.com/mikedelcastillo/minomnom-ai.git
+cd minomnom-ai
+
+cp .env.example .env
+```
+
+Edit `.env` — at minimum set these:
+
+```
+BOT_TOKEN=your_telegram_bot_token_here
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=phi3.5
+ALLOWED_USER_IDS=your_telegram_user_id
+```
+
+Start the bot (bot-only compose file — no Ollama service, since it's already running):
+
+```bash
+docker compose -f docker-compose.unraid.yml up -d --build
+```
+
+Data is persisted at `/mnt/user/appdata/minomnom-ai/app.db`.
+
+**To update:**
+
+```bash
+git pull
+docker compose -f docker-compose.unraid.yml up -d --build
+```
+
 ## Local development (no Docker)
 
 Requires [Ollama](https://ollama.com) installed on the host.
@@ -57,7 +95,10 @@ chmod +x run.sh
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `phi3.5` | Model to use |
 | `ALLOWED_USER_IDS` | _(empty = public)_ | Comma-separated Telegram user IDs |
-| `DB_PATH` | `/data/calories.db` | SQLite database path |
+| `DB_PATH` | `/data/app.db` | SQLite database path |
+| `USE_WEBHOOK` | `false` | Set `true` to use Telegram webhooks instead of polling |
+| `WEBHOOK_URL` | _(empty)_ | Public HTTPS base URL for webhook mode (e.g. `https://myapp.railway.app`) |
+| `PORT` | `8080` | Port to listen on in webhook mode |
 
 ## Commands
 

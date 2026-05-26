@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: ./bot
+    env_file: .env
+    volumes:
+      - /mnt/user/appdata/minomnom-ai:/data
+    restart: unless-stopped
+    network_mode: host
