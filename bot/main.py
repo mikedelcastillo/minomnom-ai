@@ -12,6 +12,7 @@ from telegram.ext import (
     CommandHandler,
     ConversationHandler,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
@@ -34,6 +35,7 @@ from handlers.stats import (
     undo_handler,
     help_handler,
 )
+from rate_limit import throttle_incoming
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -220,6 +222,7 @@ def main() -> None:
         per_message=False,
     )
 
+    app.add_handler(TypeHandler(Update, throttle_incoming), group=-1)
     app.add_handler(CallbackQueryHandler(delete_meal_callback, pattern=r"^del:\d+$"))
     app.add_handler(meal_conv)
     app.add_error_handler(on_error)
