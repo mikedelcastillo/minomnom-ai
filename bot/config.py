@@ -24,3 +24,7 @@ DB_PATH: str = str(
     if not Path(_db_raw).is_absolute()
     else _db_raw
 )
+
+USE_WEBHOOK: bool = os.getenv("USE_WEBHOOK", "false").lower() == "true"
+WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")
+PORT: int = int(os.getenv("PORT", "8080"))

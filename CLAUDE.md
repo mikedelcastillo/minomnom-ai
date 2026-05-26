@@ -5,16 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the bot
 
 ```bash
-# Local development (single command — starts Ollama, pulls model, runs bot)
+# Local development (requires Ollama already running on localhost:11434)
 ./run.sh
 
 # Or manually (requires Ollama already running on localhost:11434)
 cd bot && python main.py
 
-# Docker Compose (production-style)
-docker compose up -d
-docker compose exec ollama ollama pull phi3.5   # first run only
-docker compose logs -f bot
+# Unraid (pulls pre-built image from GHCR — see README for full docker run command)
+docker pull ghcr.io/mikedelcastillo/minomnom-ai:latest
 ```
 
 ## Local development setup

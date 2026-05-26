@@ -10,6 +10,7 @@ from telegram.ext import (
     filters,
 )
 
+import config
 from config import BOT_TOKEN
 import db
 from handlers.meal import (
@@ -71,7 +72,21 @@ def main() -> None:
     app.add_handler(CommandHandler("undo", undo_handler))
     app.add_handler(CommandHandler("help", help_handler))
 
-    app.run_polling()
+    if config.USE_WEBHOOK:
+        from aiohttp import web
+
+        async def health(_request: web.Request) -> web.Response:
+            return web.Response(text="ok")
+
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=config.PORT,
+            webhook_url=f"{config.WEBHOOK_URL}/telegram",
+            url_path="/telegram",
+            custom_routes=[web.get("/health", health)],
+        )
+    else:
+        app.run_polling()
 
 
 if __name__ == "__main__":

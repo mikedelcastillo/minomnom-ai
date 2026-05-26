@@ -15,7 +15,7 @@ Send any message like _"had a chicken sandwich and a coke"_ and the bot classifi
 - **Conversation commands** — `/today`, `/week`, `/history`, `/undo`
 - **One-tap delete** — inline Delete button on every logged meal
 - **User allowlist** — optional whitelist to keep the bot private
-- **Docker Compose** deployment — bot + Ollama as a two-service stack with NVIDIA GPU support
+- **Unraid-ready** — pre-built image on GHCR, installable via Unraid Docker GUI with no terminal needed
 
 ## Stack
 
@@ -25,14 +25,62 @@ Send any message like _"had a chicken sandwich and a coke"_ and the bot classifi
 
 ## Quick start
 
+See **[Deploying on Unraid](#deploying-on-unraid)** for the recommended deployment path, or **[Local development](#local-development-no-docker)** to run without Docker.
+
+## Deploying on Unraid
+
+If you already run Ollama on Unraid, this is the cheapest and lowest-latency option — the bot talks to Ollama directly over localhost.
+
+Pre-built images are published to GitHub Container Registry on every push to `main`:
+
+```
+ghcr.io/mikedelcastillo/minomnom-ai:latest
+```
+
+**Prerequisites:** Ollama is running on the same Unraid machine (e.g. via Community Applications).
+
+### Via Unraid Docker GUI
+
+1. Go to **Docker** tab → **Add Container**
+2. Set **Repository** to `ghcr.io/mikedelcastillo/minomnom-ai:latest`
+3. Set **Network type** to `Host`
+4. Add a **Path**: Container path `/data` → Host path `/mnt/user/appdata/minomnom-ai`
+5. Add the following **Variables**:
+
+| Name | Value |
+|---|---|
+| `BOT_TOKEN` | your Telegram bot token |
+| `OLLAMA_URL` | `http://localhost:11434` |
+| `OLLAMA_MODEL` | `phi3.5` |
+| `ALLOWED_USER_IDS` | your Telegram user ID |
+
+6. Click **Apply** — Unraid pulls the image and starts the bot.
+
+Data is persisted at `/mnt/user/appdata/minomnom-ai/app.db`.
+
+To update, click the container → **Update** in the Unraid Docker UI.
+
+### Via terminal
+
 ```bash
-cp .env.example .env
-# fill in BOT_TOKEN (from @BotFather) and optionally ALLOWED_USER_IDS
+docker run -d \
+  --name minomnom-ai \
+  --network host \
+  -v /mnt/user/appdata/minomnom-ai:/data \
+  -e BOT_TOKEN=your_token \
+  -e OLLAMA_URL=http://localhost:11434 \
+  -e OLLAMA_MODEL=phi3.5 \
+  -e ALLOWED_USER_IDS=your_telegram_user_id \
+  --restart unless-stopped \
+  ghcr.io/mikedelcastillo/minomnom-ai:latest
+```
 
-docker compose up -d
+**To update:**
 
-# pull the model on first run
-docker compose exec ollama ollama pull phi3.5
+```bash
+docker pull ghcr.io/mikedelcastillo/minomnom-ai:latest
+docker rm -f minomnom-ai
+# re-run the docker run command above
 ```
 
 ## Local development (no Docker)
@@ -57,7 +105,10 @@ chmod +x run.sh
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `phi3.5` | Model to use |
 | `ALLOWED_USER_IDS` | _(empty = public)_ | Comma-separated Telegram user IDs |
-| `DB_PATH` | `/data/calories.db` | SQLite database path |
+| `DB_PATH` | `/data/app.db` | SQLite database path |
+| `USE_WEBHOOK` | `false` | Set `true` to use Telegram webhooks instead of polling |
+| `WEBHOOK_URL` | _(empty)_ | Public HTTPS base URL for webhook mode (e.g. `https://myapp.railway.app`) |
+| `PORT` | `8080` | Port to listen on in webhook mode |
 
 ## Commands
 
