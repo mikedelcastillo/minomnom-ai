@@ -26,6 +26,6 @@ DB_PATH: str = str(
 )
 
 USE_WEBHOOK: bool = os.getenv("USE_WEBHOOK", "false").lower() == "true"
-WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "").rstrip("/")
-WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "")
+WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "").strip().rstrip("/")
+WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "").strip()
 PORT: int = int(os.getenv("PORT", "8080"))
