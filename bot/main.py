@@ -55,7 +55,10 @@ async def run_webhook(app: Application) -> None:
             token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
             if token != config.WEBHOOK_SECRET:
                 return web.Response(status=403)
-        data = await request.json(content_type=None)
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400)
         update = Update.de_json(data, app.bot)
         if update is None:
             return web.Response()
