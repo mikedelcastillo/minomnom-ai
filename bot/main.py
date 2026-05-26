@@ -46,6 +46,11 @@ async def post_init(application: Application) -> None:
 async def run_webhook(app: Application) -> None:
     if not config.WEBHOOK_URL:
         raise ValueError("WEBHOOK_URL must be set when USE_WEBHOOK=true")
+    if not config.WEBHOOK_URL.startswith("https://"):
+        raise ValueError(
+            f"WEBHOOK_URL must start with https:// (got {config.WEBHOOK_URL!r}); "
+            "Telegram requires HTTPS for webhooks"
+        )
 
     await app.initialize()
     await app.start()
@@ -78,7 +83,12 @@ async def run_webhook(app: Application) -> None:
         site = web.TCPSite(runner, "0.0.0.0", config.PORT)
         await site.start()
 
-        await app.bot.set_webhook(url=f"{config.WEBHOOK_URL}/telegram")
+        webhook_url = f"{config.WEBHOOK_URL}/telegram"
+        logging.getLogger(__name__).info("Registering Telegram webhook: %s", webhook_url)
+        await app.bot.set_webhook(
+            url=webhook_url,
+            secret_token=config.WEBHOOK_SECRET or None,
+        )
 
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
