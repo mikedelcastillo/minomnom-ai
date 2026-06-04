@@ -176,7 +176,15 @@ REQUIRED_KEYS = {"calories", "protein_g", "carbs_g", "fat_g"}
 
 
 def _to_range(val) -> "list | None":
-    """Accept [min, max] arrays or {"min": x, "max": y} objects; return [min, max] or None."""
+    """Accept [min, max] arrays, {"min": x, "max": y}, or string-encoded arrays; return [min, max] or None."""
+    if isinstance(val, str):
+        s = val.strip()
+        if not s.startswith("["):
+            return None
+        try:
+            val = json.loads(s)
+        except json.JSONDecodeError:
+            return None
     if isinstance(val, list) and len(val) == 2:
         lo, hi = val
     elif isinstance(val, dict) and "min" in val and "max" in val:
@@ -186,6 +194,21 @@ def _to_range(val) -> "list | None":
     if not all(isinstance(v, (int, float)) for v in (lo, hi)):
         return None
     return [int(lo), int(hi)]
+
+
+def _plan_validation_hint(data: dict) -> str:
+    """Short hint for logs when plan JSON parses but fails schema validation."""
+    if data.get("type") == "estimate":
+        missing = REQUIRED_KEYS - data.keys()
+        if missing:
+            return f"estimate missing keys: {sorted(missing)}"
+        for key in sorted(REQUIRED_KEYS):
+            if _to_range(data.get(key)) is None:
+                return f"estimate invalid {key}={data.get(key)!r}"
+        return "estimate failed normalization"
+    if data.get("type") in ("questions", "question"):
+        return "questions payload invalid"
+    return f"unknown type={data.get('type')!r}"
 
 
 def _validate_and_normalize(data: dict) -> "dict | None":
@@ -239,19 +262,28 @@ def _http_error_detail(e: httpx.HTTPError) -> str:
 async def plan(meal: str) -> dict:
     prompt = PLAN_PROMPT.format(meal=meal)
     last_exc: BaseException | None = None
+    last_data: dict | None = None
     for attempt in range(2):
         try:
             raw = await complete_json(PLAN_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
             data = json.loads(raw)
+            last_data = data if isinstance(data, dict) else None
             result = _validate_plan(data)
             if result is not None:
                 return result
-            logger.warning("plan() invalid response (attempt %d): %s", attempt + 1, raw)
+            hint = _plan_validation_hint(data) if isinstance(data, dict) else "non-object JSON"
+            logger.warning(
+                "plan() invalid response (attempt %d): %s — %s", attempt + 1, raw, hint,
+            )
         except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
             last_exc = e
             detail = _http_error_detail(e) if isinstance(e, httpx.HTTPError) else ""
             logger.warning("plan() request/parse error (attempt %d): %s%s", attempt + 1, e, detail)
-    logger.error("plan() exhausted retries", exc_info=last_exc)
+    if last_exc is None:
+        hint = _plan_validation_hint(last_data) if last_data else "no parsed response"
+        logger.error("plan() exhausted retries: validation failed — %s", hint)
+    else:
+        logger.error("plan() exhausted retries", exc_info=last_exc)
     raise ValueError("Could not get a valid plan from the model.") from last_exc
 
 
