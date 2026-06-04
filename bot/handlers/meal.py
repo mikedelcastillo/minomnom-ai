@@ -17,6 +17,20 @@ logger = logging.getLogger(__name__)
 CLARIFYING = 1
 
 
+def _log_processing_failure(
+    stage: str, update: Update, user_text: str, exc: BaseException,
+) -> None:
+    logger.error(
+        "User-facing processing failure [%s] update_id=%s user_id=%s text=%r: %s",
+        stage,
+        update.update_id,
+        update.effective_user.id if update.effective_user else None,
+        user_text[:200],
+        exc,
+        exc_info=exc.__cause__ or exc.__context__,
+    )
+
+
 @asynccontextmanager
 async def keep_typing(chat):
     # Telegram's typing indicator expires after ~5s; refresh it while LLM calls run.
@@ -167,7 +181,8 @@ async def _process_clarification(
                 pending["planned_questions"],
                 pending["clarifications"],
             )
-        except ValueError:
+        except ValueError as e:
+            _log_processing_failure("finalize", update, pending["original"], e)
             await update.effective_message.reply_text("Sorry, I couldn't process that. Try again.")
             context.user_data.pop("pending", None)
             return ConversationHandler.END
@@ -191,7 +206,8 @@ async def meal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     async with keep_typing(update.message.chat):
         try:
             classification = await llm.classify(text)
-        except ValueError:
+        except ValueError as e:
+            _log_processing_failure("classify", update, text, e)
             await update.message.reply_text("Sorry, I couldn't process that. Try again.")
             return ConversationHandler.END
 
@@ -240,7 +256,8 @@ async def meal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
         try:
             result = await llm.plan(text)
-        except ValueError:
+        except ValueError as e:
+            _log_processing_failure("plan", update, text, e)
             await update.message.reply_text("Sorry, I couldn't process that. Try again.")
             return ConversationHandler.END
 

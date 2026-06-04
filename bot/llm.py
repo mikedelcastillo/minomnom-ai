@@ -229,8 +229,16 @@ def _validate_plan(data: dict) -> "dict | None":
     return None
 
 
+def _http_error_detail(e: httpx.HTTPError) -> str:
+    if isinstance(e, httpx.HTTPStatusError):
+        body = (e.response.text or "")[:500]
+        return f" HTTP {e.response.status_code} body={body!r}"
+    return f" [url: {OLLAMA_URL}]"
+
+
 async def plan(meal: str) -> dict:
     prompt = PLAN_PROMPT.format(meal=meal)
+    last_exc: BaseException | None = None
     for attempt in range(2):
         try:
             raw = await complete_json(PLAN_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
@@ -240,12 +248,16 @@ async def plan(meal: str) -> dict:
                 return result
             logger.warning("plan() invalid response (attempt %d): %s", attempt + 1, raw)
         except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-            logger.warning("plan() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
-    raise ValueError("Could not get a valid plan from the model.")
+            last_exc = e
+            detail = _http_error_detail(e) if isinstance(e, httpx.HTTPError) else ""
+            logger.warning("plan() request/parse error (attempt %d): %s%s", attempt + 1, e, detail)
+    logger.error("plan() exhausted retries", exc_info=last_exc)
+    raise ValueError("Could not get a valid plan from the model.") from last_exc
 
 
 async def classify(text: str) -> dict:
     prompt = CLASSIFY_PROMPT.format(text=text)
+    last_exc: BaseException | None = None
     for attempt in range(2):
         try:
             raw = await complete_json(CLASSIFY_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
@@ -255,8 +267,11 @@ async def classify(text: str) -> dict:
                 return {"type": t}
             logger.warning("classify() invalid response (attempt %d): %s", attempt + 1, raw)
         except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-            logger.warning("classify() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
-    raise ValueError("Could not get a valid classification from the model.")
+            last_exc = e
+            detail = _http_error_detail(e) if isinstance(e, httpx.HTTPError) else ""
+            logger.warning("classify() request/parse error (attempt %d): %s%s", attempt + 1, e, detail)
+    logger.error("classify() exhausted retries", exc_info=last_exc)
+    raise ValueError("Could not get a valid classification from the model.") from last_exc
 
 
 def _first_paragraph(text: str) -> str:
@@ -310,7 +325,8 @@ async def extract_time_window(text: str) -> dict:
                 return result
             logger.warning("extract_time_window() invalid response (attempt %d): %s", attempt + 1, raw)
         except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-            logger.warning("extract_time_window() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+            detail = _http_error_detail(e) if isinstance(e, httpx.HTTPError) else ""
+            logger.warning("extract_time_window() request/parse error (attempt %d): %s%s", attempt + 1, e, detail)
     # Safe fallback: today
     return {"window": "today"}
 
@@ -359,7 +375,8 @@ async def classify_clarification_intent(question: str, answer: str) -> dict:
                 return {"intent": data["intent"]}
             logger.warning("classify_clarification_intent() invalid (attempt %d): %s", attempt + 1, raw)
         except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-            logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+            detail = _http_error_detail(e) if isinstance(e, httpx.HTTPError) else ""
+            logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s%s", attempt + 1, e, detail)
     return {"intent": "answer"}
 
 
@@ -372,6 +389,7 @@ async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> 
     qa_block = "\n".join(lines)
 
     prompt = FINALIZE_PROMPT.format(meal=meal, qa_block=qa_block)
+    last_exc: BaseException | None = None
     for attempt in range(2):
         try:
             raw = await complete_json(FINALIZE_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
@@ -382,5 +400,8 @@ async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> 
                     return normalized
             logger.warning("finalize() invalid response (attempt %d): %s", attempt + 1, raw)
         except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-            logger.warning("finalize() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
-    raise ValueError("Could not get a valid estimate from the model.")
+            last_exc = e
+            detail = _http_error_detail(e) if isinstance(e, httpx.HTTPError) else ""
+            logger.warning("finalize() request/parse error (attempt %d): %s%s", attempt + 1, e, detail)
+    logger.error("finalize() exhausted retries", exc_info=last_exc)
+    raise ValueError("Could not get a valid estimate from the model.") from last_exc
