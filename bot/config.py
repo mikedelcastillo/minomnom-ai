@@ -10,6 +10,18 @@ OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi3.5")
 OLLAMA_CHAT_MODEL: str = os.getenv("OLLAMA_CHAT_MODEL", OLLAMA_MODEL)
 
+
+def _resolve_llm_api(url: str) -> str:
+    explicit = os.getenv("LLM_API", "").strip().lower()
+    if explicit in ("ollama", "openai"):
+        return explicit
+    if url.endswith("/v1") or "/openai/" in url:
+        return "openai"
+    return "ollama"
+
+
+LLM_API: str = _resolve_llm_api(OLLAMA_URL)
+
 _raw_ids = os.getenv("ALLOWED_USER_IDS", "").strip()
 ALLOWED_USER_IDS: set[int] = (
     {int(uid) for uid in _raw_ids.split(",") if uid.strip()}

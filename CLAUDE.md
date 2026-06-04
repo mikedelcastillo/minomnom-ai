@@ -34,7 +34,7 @@ The bot has a strict three-layer pipeline for every incoming message:
 2. **Plan** (`llm.plan`) — for tracking messages, decides whether enough info exists to estimate immediately or which clarifying questions to ask (0–3, presented as inline keyboard buttons)
 3. **Finalize** (`llm.finalize`) — called after all clarifying answers are collected; produces the final macro estimate
 
-All LLM calls go to a local Ollama instance via HTTP (`/api/generate` for structured JSON, `/api/chat` for general conversation). Every response is validated and retried once on failure.
+All LLM calls go through `bot/llm_transport.py`, which supports Ollama native (`/api/generate`, `/api/chat`) or OpenAI-compatible (`/chat/completions`) based on `OLLAMA_URL`. URLs ending in `/v1` or containing `/openai/` auto-select OpenAI mode; override with `LLM_API=ollama|openai`. Every response is validated and retried once on failure.
 
 ### Conversation state
 
@@ -60,15 +60,16 @@ Macros are stored as min/max ranges (e.g. `calories_min`, `calories_max`) throug
 | File | Purpose |
 |---|---|
 | `bot/main.py` | Entry point; wires up `ConversationHandler` and command handlers |
-| `bot/llm.py` | All Ollama calls, prompts, and response validation |
+| `bot/llm.py` | Prompts, response validation, and high-level LLM functions |
+| `bot/llm_transport.py` | HTTP transport for Ollama vs OpenAI-compatible backends |
 | `bot/handlers/meal.py` | Message handling, clarification flow, delete callback |
 | `bot/handlers/stats.py` | `/today`, `/week`, `/history`, `/undo`, `/help` |
 | `bot/db.py` | All SQLite queries via aiosqlite |
-| `bot/config.py` | Env var loading; resolves `DB_PATH` relative to project root |
+| `bot/config.py` | Env var loading; `LLM_API` auto-detect; resolves `DB_PATH` relative to project root |
 
 ### Adding a new LLM call
 
-Follow the pattern in `llm.py`: define system prompt + prompt template as module-level constants, write an `async def` that POSTs to Ollama, validates the JSON response, and retries once. Use `format: "json"` and `/api/generate` for structured outputs; use `/api/chat` (no `format` key) for free-text conversation like `general_reply`.
+Follow the pattern in `llm.py`: define system prompt + prompt template as module-level constants, call `complete_json()` for structured outputs or `complete_chat()` for free-text, validate the response, and retry once. Transport details live in `llm_transport.py`.
 
 ### Prompt engineering notes
 

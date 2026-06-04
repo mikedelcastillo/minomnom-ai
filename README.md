@@ -8,7 +8,7 @@ Send any message like _"had a chicken sandwich and a coke"_ and the bot classifi
 
 ## Features
 
-- **Fully local inference** via [Ollama](https://ollama.com) — privacy-first, runs offline
+- **Fully local inference** via [Ollama](https://ollama.com) or any OpenAI-compatible proxy (e.g. [Olla](https://github.com/thushan/olla)) — privacy-first, runs offline
 - **Intent classification** — distinguishes meal logs from general chat, handles both naturally
 - **Guided clarification** — inline keyboard buttons for portion/cooking questions, skipped when unnecessary
 - **Macro tracking** — calories, protein, carbs, fat as min–max ranges per meal
@@ -20,7 +20,7 @@ Send any message like _"had a chicken sandwich and a coke"_ and the bot classifi
 ## Stack
 
 - Python 3.12 · [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) · aiosqlite
-- [Ollama](https://ollama.com) (default model: `phi3.5`)
+- [Ollama](https://ollama.com) or OpenAI-compatible endpoint via `OLLAMA_URL` (default model: `phi3.5`)
 - Docker Compose
 
 ## Quick start
@@ -102,8 +102,10 @@ chmod +x run.sh
 | Variable | Default | Description |
 |---|---|---|
 | `BOT_TOKEN` | required | Telegram bot token |
-| `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint |
-| `OLLAMA_MODEL` | `phi3.5` | Model to use |
+| `OLLAMA_URL` | `http://ollama:11434` | Ollama root or OpenAI-compatible base URL (e.g. `http://host:40114/olla/openai/v1`) |
+| `OLLAMA_MODEL` | `phi3.5` | Model name (must match what your backend exposes) |
+| `OLLAMA_CHAT_MODEL` | same as `OLLAMA_MODEL` | Model for general chat |
+| `LLM_API` | auto | Force `ollama` or `openai` when auto-detect is wrong |
 | `ALLOWED_USER_IDS` | _(empty = public)_ | Comma-separated Telegram user IDs |
 | `DB_PATH` | `/data/app.db` | SQLite database path |
 | `USE_WEBHOOK` | `false` | Set `true` to use Telegram webhooks instead of polling |

@@ -2,10 +2,14 @@ import json
 import logging
 import re
 import httpx
-from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL
+from config import LLM_API, OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL
+from llm_transport import complete_chat, complete_json
 
 logger = logging.getLogger(__name__)
-logger.info("Ollama endpoint: %s  model: %s  chat model: %s", OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL)
+logger.info(
+    "LLM api=%s  url=%s  model=%s  chat model=%s",
+    LLM_API, OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CHAT_MODEL,
+)
 
 PLAN_SYSTEM_PROMPT = (
     "You are a nutritionist assistant helping someone casually track their meals. "
@@ -227,51 +231,31 @@ def _validate_plan(data: dict) -> "dict | None":
 
 async def plan(meal: str) -> dict:
     prompt = PLAN_PROMPT.format(meal=meal)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "system": PLAN_SYSTEM_PROMPT,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(2):
-            try:
-                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-                resp.raise_for_status()
-                raw = resp.json()["response"]
-                data = json.loads(raw)
-                result = _validate_plan(data)
-                if result is not None:
-                    return result
-                logger.warning("plan() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("plan() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+    for attempt in range(2):
+        try:
+            raw = await complete_json(PLAN_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
+            data = json.loads(raw)
+            result = _validate_plan(data)
+            if result is not None:
+                return result
+            logger.warning("plan() invalid response (attempt %d): %s", attempt + 1, raw)
+        except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+            logger.warning("plan() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     raise ValueError("Could not get a valid plan from the model.")
 
 
 async def classify(text: str) -> dict:
     prompt = CLASSIFY_PROMPT.format(text=text)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "system": CLASSIFY_SYSTEM_PROMPT,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(2):
-            try:
-                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-                resp.raise_for_status()
-                raw = resp.json()["response"]
-                data = json.loads(raw)
-                t = data.get("type")
-                if t in ("tracking", "analytics", "general"):
-                    return {"type": t}
-                logger.warning("classify() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("classify() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+    for attempt in range(2):
+        try:
+            raw = await complete_json(CLASSIFY_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
+            data = json.loads(raw)
+            t = data.get("type")
+            if t in ("tracking", "analytics", "general"):
+                return {"type": t}
+            logger.warning("classify() invalid response (attempt %d): %s", attempt + 1, raw)
+        except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+            logger.warning("classify() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     raise ValueError("Could not get a valid classification from the model.")
 
 
@@ -287,24 +271,17 @@ async def general_reply(text: str, history: "list[dict]") -> str:
         + list(history)
         + [{"role": "user", "content": text}]
     )
-    payload = {
-        "model": OLLAMA_CHAT_MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "stop": ["\n\nUser:", "\n\nAssistant:", "\n\n---", "\n\n**"],
-            "num_predict": 80,
-        },
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
-            resp.raise_for_status()
-            content = resp.json()["message"]["content"]
-            if isinstance(content, str) and content.strip():
-                return _first_paragraph(content)
-        except (KeyError, Exception) as e:
-            logger.warning("general_reply() error: %s", e)
+    try:
+        content = await complete_chat(
+            messages,
+            model=OLLAMA_CHAT_MODEL,
+            max_tokens=80,
+            stop=["\n\nUser:", "\n\nAssistant:", "\n\n---", "\n\n**"],
+        )
+        if content.strip():
+            return _first_paragraph(content)
+    except (KeyError, httpx.HTTPError, Exception) as e:
+        logger.warning("general_reply() error: %s", e)
     raise ValueError("Could not get a general reply from the model.")
 
 
@@ -324,26 +301,16 @@ def _validate_time_window(data: dict) -> "dict | None":
 
 async def extract_time_window(text: str) -> dict:
     prompt = TIME_WINDOW_PROMPT.format(text=text)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "system": TIME_WINDOW_SYSTEM_PROMPT,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(2):
-            try:
-                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-                resp.raise_for_status()
-                raw = resp.json()["response"]
-                data = json.loads(raw)
-                result = _validate_time_window(data)
-                if result is not None:
-                    return result
-                logger.warning("extract_time_window() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("extract_time_window() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+    for attempt in range(2):
+        try:
+            raw = await complete_json(TIME_WINDOW_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
+            data = json.loads(raw)
+            result = _validate_time_window(data)
+            if result is not None:
+                return result
+            logger.warning("extract_time_window() invalid response (attempt %d): %s", attempt + 1, raw)
+        except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+            logger.warning("extract_time_window() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     # Safe fallback: today
     return {"window": "today"}
 
@@ -366,48 +333,33 @@ async def analytics_summary(question: str, totals: dict, meal_count: int, today_
         {"role": "system", "content": system},
         {"role": "user", "content": user_msg},
     ]
-    payload = {
-        "model": OLLAMA_CHAT_MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "stop": ["\n", "\n\nUser:", "\n\nAssistant:"],
-            "num_predict": 60,
-        },
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
-            resp.raise_for_status()
-            content = resp.json()["message"]["content"]
-            if isinstance(content, str) and content.strip():
-                return content.strip()
-        except (KeyError, Exception) as e:
-            logger.warning("analytics_summary() error: %s", e)
+    try:
+        content = await complete_chat(
+            messages,
+            model=OLLAMA_CHAT_MODEL,
+            max_tokens=60,
+            stop=["\n", "\n\nUser:", "\n\nAssistant:"],
+        )
+        if content.strip():
+            return content.strip()
+    except (KeyError, httpx.HTTPError, Exception) as e:
+        logger.warning("analytics_summary() error: %s", e)
     raise ValueError("Could not get an analytics summary from the model.")
 
 
 async def classify_clarification_intent(question: str, answer: str) -> dict:
     prompt = CLARIFICATION_INTENT_PROMPT.format(question=question, answer=answer)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "system": CLARIFICATION_INTENT_SYSTEM_PROMPT,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(2):
-            try:
-                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-                resp.raise_for_status()
-                raw = resp.json()["response"]
-                data = json.loads(raw)
-                if data.get("intent") in ("answer", "cancel"):
-                    return {"intent": data["intent"]}
-                logger.warning("classify_clarification_intent() invalid (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+    for attempt in range(2):
+        try:
+            raw = await complete_json(
+                CLARIFICATION_INTENT_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL,
+            )
+            data = json.loads(raw)
+            if data.get("intent") in ("answer", "cancel"):
+                return {"intent": data["intent"]}
+            logger.warning("classify_clarification_intent() invalid (attempt %d): %s", attempt + 1, raw)
+        except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+            logger.warning("classify_clarification_intent() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     return {"intent": "answer"}
 
 
@@ -420,25 +372,15 @@ async def finalize(meal: str, questions: "list[dict]", answers: "list[str]") -> 
     qa_block = "\n".join(lines)
 
     prompt = FINALIZE_PROMPT.format(meal=meal, qa_block=qa_block)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "system": FINALIZE_SYSTEM_PROMPT,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-    }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(2):
-            try:
-                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-                resp.raise_for_status()
-                raw = resp.json()["response"]
-                data = json.loads(raw)
-                if data.get("type") == "estimate":
-                    normalized = _validate_and_normalize(data)
-                    if normalized is not None:
-                        return normalized
-                logger.warning("finalize() invalid response (attempt %d): %s", attempt + 1, raw)
-            except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-                logger.warning("finalize() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
+    for attempt in range(2):
+        try:
+            raw = await complete_json(FINALIZE_SYSTEM_PROMPT, prompt, model=OLLAMA_MODEL)
+            data = json.loads(raw)
+            if data.get("type") == "estimate":
+                normalized = _validate_and_normalize(data)
+                if normalized is not None:
+                    return normalized
+            logger.warning("finalize() invalid response (attempt %d): %s", attempt + 1, raw)
+        except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+            logger.warning("finalize() request/parse error (attempt %d): %s%s", attempt + 1, e, f" [url: {OLLAMA_URL}]" if isinstance(e, httpx.HTTPError) else "")
     raise ValueError("Could not get a valid estimate from the model.")
